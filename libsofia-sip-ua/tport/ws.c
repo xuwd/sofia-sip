@@ -832,7 +832,7 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 		code = SSL_shutdown(wsh->ssl);
 		if (code == 0) {
 			/* need to make sure there is no more data to read */
-			ws_raw_read(wsh, wsh->buffer, 9, WS_BLOCK);
+			// ws_raw_read(wsh, wsh->buffer, 9, WS_BLOCK);
 		}
 
 ssl_finish_it:
