@@ -10,6 +10,8 @@
 #include <byteswap.h>
 #endif
 
+#include "dd_trace.h"
+
 #ifndef _MSC_VER
 #define ms_sleep(x)	usleep( x * 1000);
 #else
@@ -791,6 +793,9 @@ void ws_destroy(wsh_t *wsh)
 
 }
 
+
+
+
 ssize_t ws_close(wsh_t *wsh, int16_t reason)
 {
 
@@ -814,13 +819,13 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 		ws_raw_write(wsh, fr, 4);
 	}
 
-	restore_socket(wsh->sock);
+    dd_trace("/tmp/sofiaws.log", "%d begin close\n", wsh->sock);
+
 
 	if (wsh->ssl) {
 		int code = 0;
 		int ssl_error = 0;
 		const char* buf = "0";
-
 		/* check if no fatal error occurs on connection */
 		code = SSL_write(wsh->ssl, buf, 1);
 		ssl_error = SSL_get_error(wsh->ssl, code);
@@ -829,16 +834,22 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 			goto ssl_finish_it;
 		}
 
-		code = SSL_shutdown(wsh->ssl);
-		if (code == 0) {
-			/* need to make sure there is no more data to read */
-			// ws_raw_read(wsh, wsh->buffer, 9, WS_BLOCK);
-		}
+        do {
+			code = SSL_shutdown(wsh->ssl);
+			ssl_error = SSL_get_error(wsh->ssl, code);
+            if (code == -1) { 
+                ms_sleep(10);
+				dd_trace("/tmp/sofiaws.log", "%d err %d\n", wsh->sock, ssl_error);
+            }
+		} while (code == -1 && SSL_WANT_READ_WRITE(ssl_error));
+
 
 ssl_finish_it:
 		SSL_free(wsh->ssl);
 		wsh->ssl = NULL;
 	}
+
+    restore_socket(wsh->sock);
 
 	if (wsh->close_sock && wsh->sock != ws_sock_invalid) {
 #ifndef WIN32
@@ -848,7 +859,12 @@ ssl_finish_it:
 #endif
 	}
 
+    dd_trace("/tmp/sofiaws.log", "%d fin close\n", wsh->sock);
+
+
 	wsh->sock = ws_sock_invalid;
+
+
 
 	return reason * -1;
 
