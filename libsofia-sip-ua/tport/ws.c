@@ -10,8 +10,6 @@
 #include <byteswap.h>
 #endif
 
-#include "dd_trace.h"
-
 #ifndef _MSC_VER
 #define ms_sleep(x)	usleep( x * 1000);
 #else
@@ -35,13 +33,37 @@ ssize_t ws_global_payload_size_max = 0;
 
 #ifndef WSS_STANDALONE
 
+#include "dd_trace.h"
+
+
+const char* dd_format_localdatetime(char str[20])
+{
+    time_t t = time(0);
+    //strftime
+    struct tm  localtm;
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
+    localtime_s(&localtm, &t);
+#else
+    localtime_r(&t, &localtm);
+#endif
+    snprintf(str, 20, "%04d-%02d-%02d %02d:%02d:%02d", localtm.tm_year + 1900, localtm.tm_mon + 1, localtm.tm_mday, localtm.tm_hour, localtm.tm_min, localtm.tm_sec);
+
+    return str;
+}
+
 void init_ssl(void)
 {
+    char timestr[20];
+                    dd_trace("/tmp/ws.log","%s init_ssl\n",dd_format_localdatetime(timestr));
+
 	//	SSL_library_init();
 	SSL_load_error_strings();
 }
 void deinit_ssl(void)
 {
+        char timestr[20];
+                    dd_trace("/tmp/ws.log","%s deinit_ssl\n",dd_format_localdatetime(timestr));
+
 	return;
 }
 
@@ -360,6 +382,8 @@ ssize_t ws_raw_read(wsh_t *wsh, void *data, size_t bytes, int block)
 {
 	ssize_t r;
 	int ssl_err = 0;
+    time_t t=time(0);
+    char timestr[20];
 
 	wsh->x++;
 	if (wsh->x > 250) ms_sleep(1);
@@ -384,7 +408,13 @@ ssize_t ws_raw_read(wsh_t *wsh, void *data, size_t bytes, int block)
 					r = -1;
 					goto end;
 				}
+
+
 			}
+
+        if(wsh->x>10){
+                    dd_trace("/tmp/ws.log","%s ws_block %d x:%d time:%d\n",dd_format_localdatetime(timestr), wsh->sock, (int)wsh->x,(int)(time(0)-t));
+         }
 
 		} while (r < 0 && SSL_WANT_READ_WRITE(ssl_err) && wsh->x < 1000);
 
@@ -406,11 +436,19 @@ ssize_t ws_raw_read(wsh_t *wsh, void *data, size_t bytes, int block)
 				ms_sleep(10);
 			}
 		}
+
+                if(wsh->x>10){
+                    dd_trace("/tmp/ws.log","%s ws_block %d x:%d time:%d\n",dd_format_localdatetime(timestr), wsh->sock, (int)wsh->x,(int)(time(0)-t));
+                }
+
 	} while (r == -1 && xp_is_blocking(xp_errno()) && wsh->x < 1000);
 
  end:
 
 	if (wsh->x >= 10000 || (block && wsh->x >= 1000)) {
+
+            dd_trace("/tmp/ws.log","%s ws_block %d x:%d time:%d\n",dd_format_localdatetime(timestr), wsh->sock, (int)wsh->x,(int)(time(0)-t));
+
 		r = -1;
 	}
 
@@ -638,6 +676,8 @@ static int restore_socket(ws_socket_t sock)
 int establish_logical_layer(wsh_t *wsh)
 {
 
+ char timestr[20];
+
 	if (!wsh->sanity) {
 		return -1;
 	}
@@ -650,14 +690,23 @@ int establish_logical_layer(wsh_t *wsh)
 		int code;
 
 		if (!wsh->ssl) {
+                dd_trace("/tmp/ws.log","%s 1. establish_logical_layer %d\n",dd_format_localdatetime(timestr),wsh->sock);
 			wsh->ssl = SSL_new(wsh->ssl_ctx);
 			assert(wsh->ssl);
+                dd_trace("/tmp/ws.log","%s 2. establish_logical_layer %d\n",dd_format_localdatetime(timestr),wsh->sock);
 
 			SSL_set_fd(wsh->ssl, wsh->sock);
+            
+                            dd_trace("/tmp/ws.log","%s 3. establish_logical_layer %d\n",dd_format_localdatetime(timestr),wsh->sock);
+
 		}
 
 		do {
+
+
 			code = SSL_accept(wsh->ssl);
+
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d SSL_accept:%d\n",dd_format_localdatetime(timestr), wsh->sock, code);
 
 			if (code == 1) {
 				wsh->secure_established = 1;
@@ -697,7 +746,13 @@ int establish_logical_layer(wsh_t *wsh)
 	}
 
 	while (!wsh->down && !wsh->handshake) {
+        int s=wsh->sock;
+
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d ws_handshake begin\n",dd_format_localdatetime(timestr), wsh->sock);
+
 		int r = ws_handshake(wsh);
+
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d ws_handshake ret:%d\n",dd_format_localdatetime(timestr), s, r);
 
 		if (r < 0) {
 			wsh->down = 1;
@@ -722,6 +777,11 @@ void ws_set_global_payload_size_max(ssize_t bytes)
 
 int ws_init(wsh_t *wsh, ws_socket_t sock, SSL_CTX *ssl_ctx, int close_sock, int block, int stay_open)
 {
+
+    char timestr[20];
+
+    dd_trace("/tmp/ws.log","%s ws_init %d\n",dd_format_localdatetime(timestr), sock);
+
 	memset(wsh, 0, sizeof(*wsh));
 
 	wsh->payload_size_max = ws_global_payload_size_max;
@@ -752,13 +812,18 @@ int ws_init(wsh_t *wsh, ws_socket_t sock, SSL_CTX *ssl_ctx, int close_sock, int 
 
 	setup_socket(sock);
 
+    dd_trace("/tmp/ws.log","%s ws_init %d establish_logical_layer\n",dd_format_localdatetime(timestr), sock);
+
 	if (establish_logical_layer(wsh) == -1) {
+            dd_trace("/tmp/ws.log","%s ws_init %d failed\n",dd_format_localdatetime(timestr), sock);
 		return -1;
 	}
 
 	if (wsh->down) {
 		return -1;
 	}
+
+    dd_trace("/tmp/ws.log","%s ws_init %d succeed\n",dd_format_localdatetime(timestr), sock);
 
 	return 0;
 }
@@ -769,6 +834,7 @@ void ws_destroy(wsh_t *wsh)
 	if (!wsh) {
 		return;
 	}
+
 
 	if (!wsh->down) {
 		ws_close(wsh, WS_NONE);
@@ -793,15 +859,16 @@ void ws_destroy(wsh_t *wsh)
 
 }
 
-
-
-
 ssize_t ws_close(wsh_t *wsh, int16_t reason)
 {
+
+    char timestr[20];
 
 	if (wsh->down) {
 		return -1;
 	}
+
+    dd_trace("/tmp/ws.log","%s 1. ws_close %d reason:%d logical_established:%d\n",dd_format_localdatetime(timestr),wsh->sock,reason,wsh->logical_established);
 
 	wsh->down = 1;
 
@@ -810,7 +877,7 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 		wsh->uri = NULL;
 	}
 
-	if (reason && wsh->sock != ws_sock_invalid) {
+	if (wsh->logical_established && reason && wsh->sock != ws_sock_invalid) {
 		uint16_t *u16;
 		uint8_t fr[4] = {WSOC_CLOSE | 0x80, 2, 0};
 
@@ -819,52 +886,70 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 		ws_raw_write(wsh, fr, 4);
 	}
 
-    dd_trace("/tmp/sofiaws.log", "%d begin close\n", wsh->sock);
+    dd_trace("/tmp/ws.log","%s 2. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
 
 
 	if (wsh->ssl) {
-		int code = 0;
-		int ssl_error = 0;
-		const char* buf = "0";
-		/* check if no fatal error occurs on connection */
-		code = SSL_write(wsh->ssl, buf, 1);
-		ssl_error = SSL_get_error(wsh->ssl, code);
 
-		if (ssl_error == SSL_ERROR_SYSCALL || ssl_error == SSL_ERROR_SSL) {
-			goto ssl_finish_it;
-		}
+        if(wsh->secure_established){
+            
+            int code = 0;
 
-        do {
-			code = SSL_shutdown(wsh->ssl);
-			ssl_error = SSL_get_error(wsh->ssl, code);
-            if (code == -1) { 
-                ms_sleep(10);
-				dd_trace("/tmp/sofiaws.log", "%d err %d\n", wsh->sock, ssl_error);
+            int ssl_error = 0;
+            const char* buf = "0";
+
+            /* check if no fatal error occurs on connection */
+            code = SSL_write(wsh->ssl, buf, 1);
+            ssl_error = SSL_get_error(wsh->ssl, code);
+
+           dd_trace("/tmp/ws.log","%s 3. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
+
+            if (ssl_error == SSL_ERROR_SYSCALL || ssl_error == SSL_ERROR_SSL) {
+                goto ssl_finish_it;
             }
-		} while (code == -1 && SSL_WANT_READ_WRITE(ssl_error));
+
+            code = SSL_shutdown(wsh->ssl);
+            if (code == 0) {
+                /* need to make sure there is no more data to read */
+                //ws_raw_read(wsh, wsh->buffer, 9, WS_BLOCK);
+            }
+        }
 
 
 ssl_finish_it:
+
+           dd_trace("/tmp/ws.log","%s 4. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
+
 		SSL_free(wsh->ssl);
 		wsh->ssl = NULL;
+
+
 	}
 
-    restore_socket(wsh->sock);
+               dd_trace("/tmp/ws.log","%s 5. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
+
+
+	restore_socket(wsh->sock);
+
+               dd_trace("/tmp/ws.log","%s 6. ws_close %d\n",dd_format_localdatetime(timestr),wsh->sock);
 
 	if (wsh->close_sock && wsh->sock != ws_sock_invalid) {
 #ifndef WIN32
+		shutdown(wsh->sock, SHUT_RDWR);
+               dd_trace("/tmp/ws.log","%s 7. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
+
 		close(wsh->sock);
 #else
+		shutdown(wsh->sock, SD_BOTH);
+               dd_trace("/tmp/ws.log","%s 7. ws_close %d\n",dd_format_localdatetime(timestr), wsh->sock);
+
 		closesocket(wsh->sock);
 #endif
 	}
 
-    dd_trace("/tmp/sofiaws.log", "%d fin close\n", wsh->sock);
+    dd_trace("/tmp/ws.log","%s ws_close %d fin\n",dd_format_localdatetime(timestr),wsh->sock);
 
-
-	wsh->sock = ws_sock_invalid;
-
-
+    wsh->sock = ws_sock_invalid;
 
 	return reason * -1;
 
