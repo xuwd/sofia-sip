@@ -706,7 +706,7 @@ int establish_logical_layer(wsh_t *wsh)
 
 			code = SSL_accept(wsh->ssl);
 
-            dd_trace("/tmp/ws.log","%s establish_logical_layer %d SSL_accept:%d\n",dd_format_localdatetime(timestr), wsh->sock, code);
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d (%p) SSL_accept:%d\n",dd_format_localdatetime(timestr), wsh->sock, wsh, code);
 
 			if (code == 1) {
 				wsh->secure_established = 1;
@@ -748,11 +748,11 @@ int establish_logical_layer(wsh_t *wsh)
 	while (!wsh->down && !wsh->handshake) {
         int s=wsh->sock;
 
-            dd_trace("/tmp/ws.log","%s establish_logical_layer %d ws_handshake begin\n",dd_format_localdatetime(timestr), wsh->sock);
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d (%p) ws_handshake begin\n",dd_format_localdatetime(timestr), wsh->sock, wsh);
 
 		int r = ws_handshake(wsh);
 
-            dd_trace("/tmp/ws.log","%s establish_logical_layer %d ws_handshake ret:%d\n",dd_format_localdatetime(timestr), s, r);
+            dd_trace("/tmp/ws.log","%s establish_logical_layer %d (%p) ws_handshake ret:%d\n",dd_format_localdatetime(timestr), s, wsh,r);
 
 		if (r < 0) {
 			wsh->down = 1;
@@ -868,7 +868,7 @@ ssize_t ws_close(wsh_t *wsh, int16_t reason)
 		return -1;
 	}
 
-    dd_trace("/tmp/ws.log","%s 1. ws_close %d reason:%d logical_established:%d\n",dd_format_localdatetime(timestr),wsh->sock,reason,wsh->logical_established);
+    dd_trace("/tmp/ws.log","%s 1. ws_close %d (%p) reason:%d logical_established:%d\n",dd_format_localdatetime(timestr),wsh->sock, wsh,reason,wsh->logical_established);
 
 	wsh->down = 1;
 
@@ -947,7 +947,7 @@ ssl_finish_it:
 #endif
 	}
 
-    dd_trace("/tmp/ws.log","%s ws_close %d fin\n",dd_format_localdatetime(timestr),wsh->sock);
+    dd_trace("/tmp/ws.log","%s ws_close %d (%p) fin\n",dd_format_localdatetime(timestr),wsh->sock, wsh);
 
     wsh->sock = ws_sock_invalid;
 
